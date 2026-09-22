@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111827">
+<title>Concurrence Charente</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f3f4f6;color:#111827;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+header{background:#111827;color:#fff;padding:18px 14px 14px}h1{margin:0;font-size:22px}.sub{margin-top:5px;color:#cbd5e1;font-size:13px}
+.search{display:flex;gap:8px;margin-top:13px}.search input,.search select{border:0;border-radius:12px;padding:13px;font-size:16px}.search input{flex:1}.search select{width:110px}
+.actions{display:flex;gap:8px;overflow:auto;background:#fff;padding:10px 12px;border-bottom:1px solid #ddd}
+button{font:inherit;font-weight:700;border:1px solid #d1d5db;background:#fff;border-radius:12px;padding:11px 14px;touch-action:manipulation}.primary{background:#111827;color:#fff}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;padding:10px 12px}.stat{background:#fff;border:1px solid #ddd;border-radius:13px;text-align:center;padding:9px}.stat b{display:block;font-size:20px}.stat small{color:#6b7280}
+.map{margin:0 12px 10px;background:#dce9d4;border:1px solid #cbd5c3;border-radius:16px;height:260px;display:flex;align-items:center;justify-content:center;text-align:center;color:#374151}
+.map strong{display:block;font-size:18px}.map span{display:block;margin-top:6px;font-size:13px}
+.panel{padding:0 12px 30px}.item{background:#fff;border:1px solid #ddd;border-radius:15px;padding:12px;margin-bottom:9px}.item h3{font-size:15px;margin:0 0 5px}.meta{font-size:12px;color:#6b7280;line-height:1.45}.tags{margin-top:7px}.tag{display:inline-block;border-radius:999px;background:#eef2f7;padding:4px 8px;font-size:11px}.p1{background:#fee2e2;color:#991b1b}.p2{background:#fef3c7;color:#92400e}.p3{background:#dcfce7;color:#166534}.itemActions{display:flex;gap:6px;margin-top:10px}.itemActions button{flex:1;padding:9px 5px;font-size:12px}
+.modal{display:none;position:fixed;z-index:50;inset:0;background:#0008;align-items:flex-end}.sheet{background:#fff;border-radius:20px 20px 0 0;padding:18px;width:100%;max-height:85vh;overflow:auto}.sheet textarea{width:100%;height:120px;margin:12px 0;border:1px solid #ddd;border-radius:12px;padding:10px;font:inherit}.sheet h2{margin:0 0 8px}.close{float:right}
+.notice{padding:14px;text-align:center;color:#6b7280;font-size:13px}
+</style>
+</head>
+<body>
+<header>
+<h1>📍 Concurrence Charente</h1><div class="sub">Carnet terrain — repérer, visiter, suivre</div>
+<div class="search"><input id="q" placeholder="Enseigne, ville, adresse"><select id="prio"><option value="">Priorité</option><option value="1">P1</option><option value="2">P2</option><option value="3">P3</option></select></div>
+</header>
+<div class="actions">
+<button id="near" class="primary">📍 Autour de moi</button>
+<button id="all">Tout afficher</button>
+<button id="tour">🗺️ Ma tournée</button>
+<button id="backup">💾 Sauvegarde</button>
+<button id="restore">↩️ Restaurer</button>
+<input id="file" type="file" accept="application/json" hidden>
+</div>
+<div class="stats"><div class="stat"><b id="total">226</b><small>Total</small></div><div class="stat"><b id="p1">0</b><small>P1</small></div><div class="stat"><b id="vis">0</b><small>Visités</small></div><div class="stat"><b id="todo">0</b><small>À visiter</small></div></div>
+<div id="map" class="map"><div><strong>🗺️ Carte terrain</strong><span id="mapText">Utilise « Autour de moi » pour trouver les confrères proches.</span></div></div>
+<div class="panel"><div id="list"></div></div>
+<div id="modal" class="modal"><div class="sheet"><button id="close" class="close">✕</button><h2 id="mh"></h2><div id="md" class="meta"></div><div id="mt" class="tags"></div><textarea id="notes" placeholder="Notes de visite…"></textarea><button id="save" class="primary">Enregistrer</button></div></div>
+
+<script src="data.js"></script>
+<script>
+(function(){
+const KEY="cc_v5_data";
+let state={};try{state=JSON.parse(localStorage.getItem(KEY)||"{}")}catch(e){}
+let current=null;
+function saveState(){localStorage.setItem(KEY,JSON.stringify(state))}
+function s(i){return state[i]||{}}
+function esc(v){return String(v||"").replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]})}
+function filtered(){
+ const q=document.getElementById("q").value.toLowerCase().trim(), p=document.getElementById("prio").value;
+ return CONCURRENTS.map(function(x,i){return {x:x,i:i}}).filter(function(o){
+  const x=o.x, text=[x.enseigne,x.commune,x.adresse,x.cp,x.groupe].join(" ").toLowerCase();
+  return (!q||text.indexOf(q)>=0)&&(!p||x.priorite===p);
+ });
+}
+function stats(){
+ document.getElementById("total").textContent=CONCURRENTS.length;
+ document.getElementById("p1").textContent=CONCURRENTS.filter(function(x){return x.priorite==="1"}).length;
+ let n=Object.values(state).filter(function(x){return x.visited}).length;
+ document.getElementById("vis").textContent=n;document.getElementById("todo").textContent=CONCURRENTS.length-n;
+}
+function render(arr){
+ arr=arr||filtered();stats();
+ let out="";
+ arr.slice(0,100).forEach(function(o){
+  const x=o.x,z=s(o.i);
+  out+="<article class='item'><h3>"+esc(x.enseigne||"Sans enseigne")+"</h3><div class='meta'>"+esc(x.adresse)+"<br>"+esc(x.cp)+" "+esc(x.commune)+(x.groupe?" · "+esc(x.groupe):"")+"</div><div class='tags'><span class='tag "+(x.priorite==="1"?"p1":x.priorite==="2"?"p2":"p3")+"'>P"+esc(x.priorite||"—")+"</span>"+(z.visited?" <span class='tag'>✓ Visité</span>":"")+"</div><div class='itemActions'><button class='fiche' data-i='"+o.i+"'>Fiche</button><button class='itin' data-i='"+o.i+"'>🚗 Itinéraire</button><button class='visit' data-i='"+o.i+"'>"+(z.visited?"↩️ À revoir":"✓ Visité")+"</button></div></article>";
+ });
+ document.getElementById("list").innerHTML=out||"<div class='notice'>Aucun concurrent trouvé.</div>";
+}
+function card(i){
+ current=i;const x=CONCURRENTS[i],z=s(i);
+ document.getElementById("mh").textContent=x.enseigne||"Concurrent";
+ document.getElementById("md").innerHTML=esc(x.adresse)+"<br>"+esc(x.cp)+" "+esc(x.commune)+(x.groupe?"<br>"+esc(x.groupe):"");
+ document.getElementById("mt").innerHTML="<span class='tag "+(x.priorite==="1"?"p1":x.priorite==="2"?"p2":"p3")+"'>Priorité P"+esc(x.priorite||"—")+"</span>";
+ document.getElementById("notes").value=z.notes||"";document.getElementById("modal").style.display="flex";
+}
+function visit(i){let z=s(i);z.visited=!z.visited;z.date=z.visited?new Date().toISOString():"";state[i]=z;saveState();render()}
+function navigate(i){const x=CONCURRENTS[i];window.location.href="https://maps.apple.com/?address="+encodeURIComponent(x.adresse+", "+x.cp+" "+x.commune+", France")}
+document.getElementById("list").addEventListener("click",function(e){
+ const b=e.target.closest("button");if(!b)return;const i=Number(b.dataset.i);
+ if(b.classList.contains("fiche"))card(i);else if(b.classList.contains("itin"))navigate(i);else if(b.classList.contains("visit"))visit(i);
+});
+document.getElementById("q").addEventListener("input",function(){render()});
+document.getElementById("prio").addEventListener("change",function(){render()});
+document.getElementById("all").addEventListener("click",function(){document.getElementById("q").value="";document.getElementById("prio").value="";render();document.getElementById("mapText").textContent="226 confrères chargés. Utilise la recherche pour cibler une zone.";});
+document.getElementById("near").addEventListener("click",function(){
+ if(!navigator.geolocation){alert("La géolocalisation n'est pas disponible.");return}
+ navigator.geolocation.getCurrentPosition(function(pos){
+  document.getElementById("mapText").textContent="📍 Vous êtes actuellement à proximité de "+pos.coords.latitude.toFixed(3)+", "+pos.coords.longitude.toFixed(3)+".";
+  document.getElementById("map").scrollIntoView({behavior:"smooth",block:"center"});
+ },function(){alert("Autorise la localisation pour Safari dans Réglages > Confidentialité et sécurité > Service de localisation.")});
+});
+document.getElementById("tour").addEventListener("click",function(){let a=filtered().filter(function(o){return !s(o.i).visited}).slice(0,10);if(!a.length){alert("Aucun concurrent à visiter.");return}navigate(a[0].i)});
+document.getElementById("backup").addEventListener("click",function(){const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="concurrence-charente-sauvegarde.json";document.body.appendChild(a);a.click();a.remove()});
+document.getElementById("restore").addEventListener("click",function(){document.getElementById("file").click()});
+document.getElementById("file").addEventListener("change",function(e){const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=function(){try{state=JSON.parse(r.result)||{};saveState();render();alert("Sauvegarde restaurée.")}catch(_){alert("Fichier invalide.")}};r.readAsText(f)});
+document.getElementById("close").addEventListener("click",function(){document.getElementById("modal").style.display="none"});
+document.getElementById("save").addEventListener("click",function(){if(current===null)return;let z=s(current);z.notes=document.getElementById("notes").value;state[current]=z;saveState();document.getElementById("modal").style.display="none";render()});
+render();
+})();
+</script>
+</body>
+</html>
